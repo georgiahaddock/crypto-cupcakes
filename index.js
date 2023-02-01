@@ -1,5 +1,5 @@
 require('dotenv').config('.env');
-require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const express = require('express');
 const app = express();
@@ -8,32 +8,15 @@ const { PORT = 3000 } = process.env;
 // TODO - require express-openid-connect and destructure auth from it
 const {auth, requiresAuth } = require('express-openid-connect');
 const { User, Cupcake } = require('./db');
+const {getUser, errorHandle} = require('./middleware.js')
 
 // middleware
-app.use(cors());
-app.use(morgan('dev'));
-app.use(express.json());
-app.use(express.urlencoded({extended:true}));
-
-//Create a new piece of middleware that will run right after the Auth0 auth(config) router.
-//Inside this middleware, use Sequelize’s findOrCreate to find a user if they exist, or create one!  
-//To findOrCreate you should pass the username, name, and email.
-const getUser = async (req, res, next) => {
-  try{
-  const {nickname, email} = req.oidc.user;
-  const [user] = await User.findOrCreate({ where: {username: nickname, email: email} });
-  console.log(user);
-  next();
-  }catch(err){
-    console.log(err,"failed to find or create a user");
-    next(err);
-  }
-};
+app.use(cors()).use(morgan('dev')).use(express.json()).use(express.urlencoded({extended:true}));
 
 /* *********** YOUR CODE HERE *********** */
 // follow the module instructions: destructure config environment variables from process.env
 const {
-  AUTH0_SECRET, // generate one by using: `openssl rand -base64 32`
+  AUTH0_SECRET, 
   AUTH0_AUDIENCE,
   AUTH0_CLIENT_ID,
   AUTH0_BASE_URL,
@@ -87,12 +70,28 @@ app.get('/profile', (req, res, next) =>{
   }
 })
 
+app.get('/me', async (req, res, next) =>{
+  console.log(req.oidc.user);
+  try{
+    const {email} = req.oidc.user;
+    const user = await User.findOne(
+      {where:
+        {email}
+      },
+    )
+    if(user){
+      const token = jwt.sign(user.toJSON(), JWT_SECRET, { expiresIn: '1w' })
+      res.send({user: user.toJSON(), token});
+    }else{
+      res.status(404).send(`no user found. please log in`)
+    }
+  }catch(err){
+    next(err);
+  }
+})
+
 // error handling middleware
-app.use((error, req, res, next) => {
-  console.error('SERVER ERROR: ', error);
-  if(res.statusCode < 400) res.status(500);
-  res.send({error: error.message, name: error.name, message: error.message});
-});
+app.use(errorHandle);
 
 app.listen(PORT, () => {
   console.log(`Cupcakes are ready at http://localhost:${PORT}`);
